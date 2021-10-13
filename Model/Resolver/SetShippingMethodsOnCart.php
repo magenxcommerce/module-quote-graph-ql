@@ -11,43 +11,45 @@ use Magento\Framework\GraphQl\Exception\GraphQlInputException;
 use Magento\Framework\GraphQl\Query\ResolverInterface;
 use Magento\Framework\GraphQl\Config\Element\Field;
 use Magento\Framework\GraphQl\Schema\Type\ResolveInfo;
+use Magento\Framework\Stdlib\ArrayManager;
 use Magento\QuoteGraphQl\Model\Cart\GetCartForUser;
-use Magento\QuoteGraphQl\Model\Cart\SetShippingMethodsOnCartInterface;
-use Magento\QuoteGraphQl\Model\Cart\CheckCartCheckoutAllowance;
+use Magento\QuoteGraphQl\Model\Cart\SetShippingMethodOnCart;
 
 /**
+ * Class SetShippingMethodsOnCart
+ *
  * Mutation resolver for setting shipping methods for shopping cart
  */
 class SetShippingMethodsOnCart implements ResolverInterface
 {
+    /**
+     * @var SetShippingMethodOnCart
+     */
+    private $setShippingMethodOnCart;
+
+    /**
+     * @var ArrayManager
+     */
+    private $arrayManager;
+
     /**
      * @var GetCartForUser
      */
     private $getCartForUser;
 
     /**
-     * @var SetShippingMethodsOnCartInterface
-     */
-    private $setShippingMethodsOnCart;
-
-    /**
-     * @var CheckCartCheckoutAllowance
-     */
-    private $checkCartCheckoutAllowance;
-
-    /**
+     * @param ArrayManager $arrayManager
      * @param GetCartForUser $getCartForUser
-     * @param SetShippingMethodsOnCartInterface $setShippingMethodsOnCart
-     * @param CheckCartCheckoutAllowance $checkCartCheckoutAllowance
+     * @param SetShippingMethodOnCart $setShippingMethodOnCart
      */
     public function __construct(
+        ArrayManager $arrayManager,
         GetCartForUser $getCartForUser,
-        SetShippingMethodsOnCartInterface $setShippingMethodsOnCart,
-        CheckCartCheckoutAllowance $checkCartCheckoutAllowance
+        SetShippingMethodOnCart $setShippingMethodOnCart
     ) {
+        $this->arrayManager = $arrayManager;
         $this->getCartForUser = $getCartForUser;
-        $this->setShippingMethodsOnCart = $setShippingMethodsOnCart;
-        $this->checkCartCheckoutAllowance = $checkCartCheckoutAllowance;
+        $this->setShippingMethodOnCart = $setShippingMethodOnCart;
     }
 
     /**
@@ -55,25 +57,43 @@ class SetShippingMethodsOnCart implements ResolverInterface
      */
     public function resolve(Field $field, $context, ResolveInfo $info, array $value = null, array $args = null)
     {
-        if (empty($args['input']['cart_id'])) {
+        $shippingMethods = $this->arrayManager->get('input/shipping_methods', $args);
+        $maskedCartId = $this->arrayManager->get('input/cart_id', $args);
+
+        if (!$maskedCartId) {
             throw new GraphQlInputException(__('Required parameter "cart_id" is missing'));
         }
-        $maskedCartId = $args['input']['cart_id'];
-
-        if (empty($args['input']['shipping_methods'])) {
+        if (!$shippingMethods) {
             throw new GraphQlInputException(__('Required parameter "shipping_methods" is missing'));
         }
-        $shippingMethods = $args['input']['shipping_methods'];
 
-        $storeId = (int)$context->getExtensionAttributes()->getStore()->getId();
-        $cart = $this->getCartForUser->execute($maskedCartId, $context->getUserId(), $storeId);
-        $this->checkCartCheckoutAllowance->execute($cart);
-        $this->setShippingMethodsOnCart->execute($context, $cart, $shippingMethods);
+        $shippingMethod = reset($shippingMethods); // This point can be extended for multishipping
+
+        if (!$shippingMethod['cart_address_id']) {
+            throw new GraphQlInputException(__('Required parameter "cart_address_id" is missing'));
+        }
+        if (!$shippingMethod['shipping_carrier_code']) {
+            throw new GraphQlInputException(__('Required parameter "shipping_carrier_code" is missing'));
+        }
+        if (!$shippingMethod['shipping_method_code']) {
+            throw new GraphQlInputException(__('Required parameter "shipping_method_code" is missing'));
+        }
+
+        $userId = $context->getUserId();
+        $cart = $this->getCartForUser->execute((string) $maskedCartId, $userId);
+
+        $this->setShippingMethodOnCart->execute(
+            $cart,
+            $shippingMethod['cart_address_id'],
+            $shippingMethod['shipping_carrier_code'],
+            $shippingMethod['shipping_method_code']
+        );
 
         return [
             'cart' => [
-                'model' => $cart,
-            ],
+                'cart_id' => $maskedCartId,
+                'model' => $cart
+            ]
         ];
     }
 }

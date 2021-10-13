@@ -11,7 +11,9 @@ use Magento\Framework\GraphQl\Config\Element\Field;
 use Magento\Framework\GraphQl\Exception\GraphQlInputException;
 use Magento\Framework\GraphQl\Query\ResolverInterface;
 use Magento\Framework\GraphQl\Schema\Type\ResolveInfo;
+use Magento\Framework\Stdlib\ArrayManager;
 use Magento\QuoteGraphQl\Model\Cart\AddProductsToCart;
+use Magento\QuoteGraphQl\Model\Cart\ExtractDataFromCart;
 use Magento\QuoteGraphQl\Model\Cart\GetCartForUser;
 
 /**
@@ -20,6 +22,11 @@ use Magento\QuoteGraphQl\Model\Cart\GetCartForUser;
  */
 class AddSimpleProductsToCart implements ResolverInterface
 {
+    /**
+     * @var ArrayManager
+     */
+    private $arrayManager;
+
     /**
      * @var GetCartForUser
      */
@@ -31,15 +38,26 @@ class AddSimpleProductsToCart implements ResolverInterface
     private $addProductsToCart;
 
     /**
+     * @var ExtractDataFromCart
+     */
+    private $extractDataFromCart;
+
+    /**
+     * @param ArrayManager $arrayManager
      * @param GetCartForUser $getCartForUser
      * @param AddProductsToCart $addProductsToCart
+     * @param ExtractDataFromCart $extractDataFromCart
      */
     public function __construct(
+        ArrayManager $arrayManager,
         GetCartForUser $getCartForUser,
-        AddProductsToCart $addProductsToCart
+        AddProductsToCart $addProductsToCart,
+        ExtractDataFromCart $extractDataFromCart
     ) {
+        $this->arrayManager = $arrayManager;
         $this->getCartForUser = $getCartForUser;
         $this->addProductsToCart = $addProductsToCart;
+        $this->extractDataFromCart = $extractDataFromCart;
     }
 
     /**
@@ -47,26 +65,25 @@ class AddSimpleProductsToCart implements ResolverInterface
      */
     public function resolve(Field $field, $context, ResolveInfo $info, array $value = null, array $args = null)
     {
-        if (empty($args['input']['cart_id'])) {
-            throw new GraphQlInputException(__('Required parameter "cart_id" is missing'));
-        }
-        $maskedCartId = $args['input']['cart_id'];
+        $cartHash = $this->arrayManager->get('input/cart_id', $args);
+        $cartItems = $this->arrayManager->get('input/cartItems', $args);
 
-        if (empty($args['input']['cart_items'])
-            || !is_array($args['input']['cart_items'])
-        ) {
-            throw new GraphQlInputException(__('Required parameter "cart_items" is missing'));
+        if (!isset($cartHash)) {
+            throw new GraphQlInputException(__('Missing key "cart_id" in cart data'));
         }
-        $cartItems = $args['input']['cart_items'];
 
-        $storeId = (int)$context->getExtensionAttributes()->getStore()->getId();
-        $cart = $this->getCartForUser->execute($maskedCartId, $context->getUserId(), $storeId);
+        if (!isset($cartItems) || !is_array($cartItems) || empty($cartItems)) {
+            throw new GraphQlInputException(__('Missing key "cartItems" in cart data'));
+        }
+
+        $currentUserId = $context->getUserId();
+        $cart = $this->getCartForUser->execute((string)$cartHash, $currentUserId);
+
         $this->addProductsToCart->execute($cart, $cartItems);
+        $cartData = $this->extractDataFromCart->execute($cart);
 
         return [
-            'cart' => [
-                'model' => $cart,
-            ],
+            'cart' => $cartData,
         ];
     }
 }

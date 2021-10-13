@@ -11,9 +11,7 @@ use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\GraphQl\Config\Element\Field;
 use Magento\Framework\GraphQl\Query\ResolverInterface;
 use Magento\Framework\GraphQl\Schema\Type\ResolveInfo;
-use Magento\Quote\Model\Quote;
-use Magento\QuoteGraphQl\Model\Cart\ExtractQuoteAddressData;
-use Magento\QuoteGraphQl\Model\Cart\ValidateAddressFromSchema;
+use Magento\QuoteGraphQl\Model\Cart\ExtractDataFromAddress;
 
 /**
  * @inheritdoc
@@ -21,25 +19,16 @@ use Magento\QuoteGraphQl\Model\Cart\ValidateAddressFromSchema;
 class ShippingAddresses implements ResolverInterface
 {
     /**
-     * @var ExtractQuoteAddressData
+     * @var ExtractDataFromAddress
      */
-    private $extractQuoteAddressData;
+    private $extractDataFromAddress;
 
     /**
-     * @var ValidateAddressFromSchema
+     * @param ExtractDataFromAddress $extractDataFromAddress
      */
-    private $validateAddressFromSchema;
-
-    /**
-     * @param ExtractQuoteAddressData $extractQuoteAddressData
-     * @param ValidateAddressFromSchema $validateAddressFromSchema
-     */
-    public function __construct(
-        ExtractQuoteAddressData $extractQuoteAddressData,
-        ValidateAddressFromSchema $validateAddressFromSchema
-    ) {
-        $this->extractQuoteAddressData = $extractQuoteAddressData;
-        $this->validateAddressFromSchema = $validateAddressFromSchema;
+    public function __construct(ExtractDataFromAddress $extractDataFromAddress)
+    {
+        $this->extractDataFromAddress = $extractDataFromAddress;
     }
 
     /**
@@ -50,7 +39,6 @@ class ShippingAddresses implements ResolverInterface
         if (!isset($value['model'])) {
             throw new LocalizedException(__('"model" value should be specified'));
         }
-        /** @var Quote $cart */
         $cart = $value['model'];
 
         $addressesData = [];
@@ -58,11 +46,7 @@ class ShippingAddresses implements ResolverInterface
 
         if (count($shippingAddresses)) {
             foreach ($shippingAddresses as $shippingAddress) {
-                $address = $this->extractQuoteAddressData->execute($shippingAddress);
-
-                if ($this->validateAddressFromSchema->execute($address)) {
-                    $addressesData[] = $address;
-                }
+                $addressesData[] = $this->extractDataFromAddress->execute($shippingAddress);
             }
         }
         return $addressesData;

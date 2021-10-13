@@ -7,15 +7,13 @@ declare(strict_types=1);
 
 namespace Magento\QuoteGraphQl\Model\Resolver;
 
-use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\GraphQl\Config\Element\Field;
-use Magento\Framework\GraphQl\Exception\GraphQlAlreadyExistsException;
-use Magento\Framework\GraphQl\Exception\GraphQlInputException;
 use Magento\Framework\GraphQl\Query\ResolverInterface;
 use Magento\Framework\GraphQl\Schema\Type\ResolveInfo;
-use Magento\Quote\Model\MaskedQuoteIdToQuoteIdInterface;
-use Magento\QuoteGraphQl\Model\Cart\CreateEmptyCartForCustomer;
-use Magento\QuoteGraphQl\Model\Cart\CreateEmptyCartForGuest;
+use Magento\Quote\Api\CartManagementInterface;
+use Magento\Quote\Api\GuestCartManagementInterface;
+use Magento\Quote\Model\QuoteIdToMaskedQuoteIdInterface;
+use Magento\Quote\Model\QuoteIdMaskFactory;
 
 /**
  * @inheritdoc
@@ -23,33 +21,41 @@ use Magento\QuoteGraphQl\Model\Cart\CreateEmptyCartForGuest;
 class CreateEmptyCart implements ResolverInterface
 {
     /**
-     * @var CreateEmptyCartForCustomer
+     * @var CartManagementInterface
      */
-    private $createEmptyCartForCustomer;
+    private $cartManagement;
 
     /**
-     * @var CreateEmptyCartForGuest
+     * @var GuestCartManagementInterface
      */
-    private $createEmptyCartForGuest;
+    private $guestCartManagement;
 
     /**
-     * @var MaskedQuoteIdToQuoteIdInterface
+     * @var QuoteIdToMaskedQuoteIdInterface
      */
-    private $maskedQuoteIdToQuoteId;
+    private $quoteIdToMaskedId;
 
     /**
-     * @param CreateEmptyCartForCustomer $createEmptyCartForCustomer
-     * @param CreateEmptyCartForGuest $createEmptyCartForGuest
-     * @param MaskedQuoteIdToQuoteIdInterface $maskedQuoteIdToQuoteId
+     * @var QuoteIdMaskFactory
+     */
+    private $quoteIdMaskFactory;
+
+    /**
+     * @param CartManagementInterface $cartManagement
+     * @param GuestCartManagementInterface $guestCartManagement
+     * @param QuoteIdToMaskedQuoteIdInterface $quoteIdToMaskedId
+     * @param QuoteIdMaskFactory $quoteIdMaskFactory
      */
     public function __construct(
-        CreateEmptyCartForCustomer $createEmptyCartForCustomer,
-        CreateEmptyCartForGuest $createEmptyCartForGuest,
-        MaskedQuoteIdToQuoteIdInterface $maskedQuoteIdToQuoteId
+        CartManagementInterface $cartManagement,
+        GuestCartManagementInterface $guestCartManagement,
+        QuoteIdToMaskedQuoteIdInterface $quoteIdToMaskedId,
+        QuoteIdMaskFactory $quoteIdMaskFactory
     ) {
-        $this->createEmptyCartForCustomer = $createEmptyCartForCustomer;
-        $this->createEmptyCartForGuest = $createEmptyCartForGuest;
-        $this->maskedQuoteIdToQuoteId = $maskedQuoteIdToQuoteId;
+        $this->cartManagement = $cartManagement;
+        $this->guestCartManagement = $guestCartManagement;
+        $this->quoteIdToMaskedId = $quoteIdToMaskedId;
+        $this->quoteIdMaskFactory = $quoteIdMaskFactory;
     }
 
     /**
@@ -59,49 +65,19 @@ class CreateEmptyCart implements ResolverInterface
     {
         $customerId = $context->getUserId();
 
-        $predefinedMaskedQuoteId = null;
-        if (isset($args['input']['cart_id'])) {
-            $predefinedMaskedQuoteId = $args['input']['cart_id'];
-            $this->validateMaskedId($predefinedMaskedQuoteId);
+        if (0 !== $customerId && null !== $customerId) {
+            $quoteId = $this->cartManagement->createEmptyCartForCustomer($customerId);
+            $maskedQuoteId = $this->quoteIdToMaskedId->execute((int)$quoteId);
+
+            if (empty($maskedQuoteId)) {
+                $quoteIdMask = $this->quoteIdMaskFactory->create();
+                $quoteIdMask->setQuoteId($quoteId)->save();
+                $maskedQuoteId = $quoteIdMask->getMaskedId();
+            }
+        } else {
+            $maskedQuoteId = $this->guestCartManagement->createEmptyCart();
         }
 
-        $maskedQuoteId = (0 === $customerId || null === $customerId)
-            ? $this->createEmptyCartForGuest->execute($predefinedMaskedQuoteId)
-            : $this->createEmptyCartForCustomer->execute($customerId, $predefinedMaskedQuoteId);
         return $maskedQuoteId;
-    }
-
-    /**
-     * Validate masked id
-     *
-     * @param string $maskedId
-     * @throws GraphQlAlreadyExistsException
-     * @throws GraphQlInputException
-     */
-    private function validateMaskedId(string $maskedId): void
-    {
-        if (mb_strlen($maskedId) != 32) {
-            throw new GraphQlInputException(__('Cart ID length should to be 32 symbols.'));
-        }
-
-        if ($this->isQuoteWithSuchMaskedIdAlreadyExists($maskedId)) {
-            throw new GraphQlAlreadyExistsException(__('Cart with ID "%1" already exists.', $maskedId));
-        }
-    }
-
-    /**
-     * Check is quote with such maskedId already exists
-     *
-     * @param string $maskedId
-     * @return bool
-     */
-    private function isQuoteWithSuchMaskedIdAlreadyExists(string $maskedId): bool
-    {
-        try {
-            $this->maskedQuoteIdToQuoteId->execute($maskedId);
-            return true;
-        } catch (NoSuchEntityException $e) {
-            return false;
-        }
     }
 }
