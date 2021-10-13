@@ -49,23 +49,22 @@ class RemoveItemFromCart implements ResolverInterface
      */
     public function resolve(Field $field, $context, ResolveInfo $info, array $value = null, array $args = null)
     {
-        if (empty($args['input']['cart_id'])) {
+        if (!isset($args['input']['cart_id']) || empty($args['input']['cart_id'])) {
             throw new GraphQlInputException(__('Required parameter "cart_id" is missing.'));
         }
         $maskedCartId = $args['input']['cart_id'];
 
-        if (empty($args['input']['cart_item_id'])) {
+        if (!isset($args['input']['cart_item_id']) || empty($args['input']['cart_item_id'])) {
             throw new GraphQlInputException(__('Required parameter "cart_item_id" is missing.'));
         }
         $itemId = $args['input']['cart_item_id'];
 
-        $storeId = (int)$context->getExtensionAttributes()->getStore()->getId();
-        $cart = $this->getCartForUser->execute($maskedCartId, $context->getUserId(), $storeId);
+        $cart = $this->getCartForUser->execute($maskedCartId, $context->getUserId());
 
         try {
             $this->cartItemRepository->deleteById((int)$cart->getId(), $itemId);
         } catch (NoSuchEntityException $e) {
-            throw new GraphQlNoSuchEntityException(__('The cart doesn\'t contain the item'));
+            throw new GraphQlNoSuchEntityException(__($e->getMessage()), $e);
         } catch (LocalizedException $e) {
             throw new GraphQlInputException(__($e->getMessage()), $e);
         }
